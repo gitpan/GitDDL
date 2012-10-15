@@ -35,11 +35,12 @@
       "runtime" : {
          "requires" : {
             "DBI" : 0,
+            "File::Path" : "2.07",
             "Git::Repository" : 0,
             "SQL::Translator" : "0.11016"
          }
       }
    },
    "release_status" : "stable",
-   "version" : "0.01"
+   "version" : "0.02"
 }
