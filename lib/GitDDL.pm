@@ -2,9 +2,9 @@ package GitDDL;
 use strict;
 use warnings;
 
-use Any::Moose;
+use Mouse;
 
-our $VERSION = '0.02';
+our $VERSION = '0.03';
 
 use Carp;
 use DBI;
@@ -30,6 +30,12 @@ has dsn => (
     required => 1,
 );
 
+has sql_filter => (
+    is      => 'rw',
+    lazy    => 1,
+    builder => '_build_sql_filter',
+);
+
 has version_table => (
     is      => 'rw',
     default => 'git_ddl_version',
@@ -47,7 +53,7 @@ has _git => (
     builder => '_build_git',
 );
 
-no Any::Moose;
+no Mouse;
 
 sub check_version {
     my ($self) = @_;
@@ -120,16 +126,19 @@ sub diff {
         :                      do { my ($d) = $dsn0 =~ /dbi:(.*?):/; $d };
 
     my $tmp_fh = File::Temp->new;
-    $self->_dump_sql_for_specified_coomit($self->database_version, $tmp_fh->filename);
+    $self->_dump_sql_for_specified_commit($self->database_version, $tmp_fh->filename);
 
+    my $source_sql = $self->sql_filter->($self->_slurp($tmp_fh->filename));
     my $source = SQL::Translator->new;
     $source->parser($db) or croak $source->error;
-    $source->translate($tmp_fh->filename) or croak $source->error;
+    $source->translate(\$source_sql) or croak $source->error;
 
+    my $target_sql = $self->sql_filter->(
+        $self->_slurp(File::Spec->catfile($self->work_tree, $self->ddl_file))
+    );
     my $target = SQL::Translator->new;
     $target->parser($db) or croak $target->error;
-    $target->translate(File::Spec->catfile($self->work_tree, $self->ddl_file))
-        or croak $target->error;
+    $target->translate(\$target_sql) or croak $target->error;
 
     my $diff = SQL::Translator::Diff->new({
         output_db     => $db,
@@ -183,6 +192,11 @@ sub _build_git {
     Git::Repository->new( work_tree => $self->work_tree );
 }
 
+sub _build_sql_filter {
+    my ($self) = @_;
+    sub { shift };
+}
+
 sub _do_sql {
     my ($self, $sql) = @_;
 
@@ -203,7 +217,7 @@ sub _slurp {
     $data;
 }
 
-sub _dump_sql_for_specified_coomit {
+sub _dump_sql_for_specified_commit {
     my ($self, $commit_hash, $outfile) = @_;
 
     my ($mode, $type, $blob_hash) = split /\s+/, scalar $self->_git->run(
@@ -285,6 +299,10 @@ DSN parameter that pass to L<DBI> module.
 =item * version_table => 'Str' (optional)
 
 database table name that contains its git commit version. (default: git_ddl_version)
+
+=item * sql_filter => 'CodeRef' (optional)
+
+CodeRef for filtering sql content. It is invoked only in C<< diff() >> method. (default: do nothing)
 
 =back
 
